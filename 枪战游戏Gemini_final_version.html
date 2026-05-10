@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>孤胆枪手：日光突袭 (最终稳定版)</title>
+    <style>
+        body { margin: 0; background-color: #d8d8d8; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; }
+        canvas { display: block; background-color: #F0F4F8; cursor: crosshair; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; color: #333; }
+        .screen {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background-color: rgba(255, 255, 255, 0.95); padding: 30px; border-radius: 15px;
+            text-align: center; pointer-events: all; border: 2px solid #AABBC3;
+            box-shadow: 0 5px 25px rgba(0, 0, 0, 0.1); width: 450px;
+        }
+        .screen h1 { margin-top: 0; font-size: 2.5em; color: #2C3E50; }
+        .screen p { font-size: 1.1em; color: #555; line-height: 1.6; }
+        .button {
+            padding: 12px 25px; font-size: 1.2em; cursor: pointer; background: #3498DB;
+            border: none; color: white; font-weight: bold; border-radius: 8px; margin-top: 20px;
+            transition: transform 0.2s, background-color 0.2s; text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        .button:hover { transform: translateY(-2px); background-color: #2980B9; }
+        #settings-button {
+            position: absolute; top: 20px; right: 20px; pointer-events: all; background: #fff; border: 2px solid #AABBC3; 
+            border-radius: 50%; width: 50px; height: 50px; cursor: pointer; transition: all 0.2s;
+            font-size: 24px; color: #34568B; line-height: 50px; text-align: center;
+        }
+        #settings-button:hover { transform: rotate(45deg); border-color: #3498DB; }
+        #meta-currency-display {
+            position: absolute; top: 25px; left: 20px; background: rgba(255, 255, 255, 0.7); padding: 8px 15px; 
+            border-radius: 20px; font-weight: bold; border: 2px solid #AABBC3; color: #6A4C93;
+        }
+        .menu-row { margin: 20px 0; text-align: left; display: flex; align-items: center; justify-content: space-between; }
+        .menu-row label { font-weight: bold; color: #333; }
+        input[type="range"] { flex-grow: 1; margin-left: 20px; cursor: pointer; }
+        #shape-selector button { background: #EAECEE; border: 2px solid #AABBC3; padding: 8px 15px; margin: 0 5px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        #shape-selector button.active { background: #3498DB; color: white; border-color: #2980B9; }
+        #workshopScreen .upgrade-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: #f0f4f8; border-radius: 8px; }
+        #workshopScreen .upgrade-item button { margin-top: 0; padding: 5px 10px; font-size: 0.9em; }
+        #workshopScreen .upgrade-item button:disabled { background: #bdc3c7; cursor: not-allowed; }
+        #levelUpScreen { pointer-events: all; }
+        .upgrade-choice { background: #f0f4f8; border: 2px solid #AABBC3; border-radius: 10px; padding: 15px; margin: 10px 0; cursor: pointer; text-align: left; transition: all 0.2s; }
+        .upgrade-choice:hover { border-color: #3498DB; transform: scale(1.05); }
+        .upgrade-choice h3 { margin: 0 0 5px 0; color: #2C3E50; }
+        .upgrade-choice p { margin: 0; font-size: 0.9em; color: #555; }
+        .upgrade-choice .level { float: right; font-weight: bold; color: #3498DB; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <audio id="bgmAudio" loop src="bgm.mp3" onerror="alert('背景音乐(bgm.mp3)加载失败！\n请确认文件是否与HTML文件在同一目录下。')"></audio>
+    <div id="ui-layer">
+        <button id="settings-button" style="display: none;">⚙️</button>
+        <div id="meta-currency-display" style="display: none;"></div>
+        <div id="startScreen" class="screen"></div>
+        <div id="gameOverScreen" class="screen" style="display: none;"></div>
+        <div id="workshopScreen" class="screen" style="display: none;"></div>
+        <div id="settingsScreen" class="screen" style="display: none;"></div>
+        <div id="levelUpScreen" class="screen" style="display: none;"></div>
+    </div>
+
+<script>
+// =================================
+// GAME SETUP & CONSTANTS
+// =================================
+const canvas = document.getElementById('gameCanvas'); const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+const WEAPONS = {
+    default: { name: '标准', fireRate: 8, bulletCount: 1, damage: 1 },
+    shotgun: { name: '霰弹枪', fireRate: 2, bulletCount: 6, spread: 0.5, damage: 0.7 },
+    machinegun: { name: '速射机枪', fireRate: 15, bulletCount: 1, spread: 0.2, damage: 0.8 },
+};
+const ENEMY_TYPES = {
+    CHASER: { RADIUS: 22, SPEED: 2, HEALTH: 3, XP: 10, COLOR: '#6A4C93' },
+    SHOOTER: { RADIUS: 18, SPEED: 1.5, HEALTH: 2, XP: 15, FIRE_RATE: 0.6, COLOR: '#D35400' },
+};
+const UPGRADE_POOL = {
+    speedRune: { name: "速度符文", description: "提升8%移动速度。", maxLevel: 5, type: 'passive' },
+    armorPlate: { name: "装甲板", description: "提升10点最大生命值。", maxLevel: 5, type: 'passive' },
+    xpMagnet: { name: "经验磁铁", description: "提升25%经验拾取范围。", maxLevel: 3, type: 'passive' },
+    powerMatrix: { name: "能量矩阵", description: "提升所有伤害5%。", maxLevel: 5, type: 'passive' },
+    magicMissile: { name: "魔法飞弹", description: "发射追踪飞弹，升级提升伤害。", baseDamage: 2, maxLevel: 5, type: 'weapon' },
+    guardianAura: { name: "守护光环", description: "生成光环对敌人造成伤害。", baseDamage: 0.2, maxLevel: 5, type: 'weapon' },
+};
+const PLAYER_SHAPES = {
+    triangle: (ctx, radius, color) => { ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(radius, 0); ctx.lineTo(-radius / 2, -radius / 1.5); ctx.lineTo(-radius / 2, radius / 1.5); ctx.closePath(); ctx.fill(); },
+    square: (ctx, radius, color) => { ctx.fillStyle = color; ctx.fillRect(-radius * 0.7, -radius * 0.7, radius * 1.4, radius * 1.4); },
+    star: (ctx, radius, color) => { ctx.fillStyle = color; ctx.beginPath(); for (let i = 0; i < 5; i++) { ctx.lineTo(Math.cos((18 + i * 72) * Math.PI / 180) * radius, -Math.sin((18 + i * 72) * Math.PI / 180) * radius); ctx.lineTo(Math.cos((54 + i * 72) * Math.PI / 180) * radius * 0.5, -Math.sin((54 + i * 72) * Math.PI / 180) * radius * 0.5); } ctx.closePath(); ctx.fill(); }
+};
+
+// =================================
+// GAME STATE & META-PROGRESSION
+// =================================
+let keys = {}, mouse = { x: 0, y: 0, down: false };
+let entities, player, particles = [], powerUps = [];
+let score, gameTime, wave, gameState = 'start', lastTime = 0;
+let sfxVolume = 0.8, bgmVolume = 0.5;
+let tempMetaCurrency = 0;
+let metaData = {
+    currency: 0,
+    upgrades: {
+        health: { level: 0, cost: 10, costIncrease: 1.5, value: 5, name: "最大生命" },
+        speed: { level: 0, cost: 15, costIncrease: 1.8, value: 0.02, name: "移动速度" },
+        xpRate: { level: 0, cost: 20, costIncrease: 2, value: 0.05, name: "经验获取" },
+        luck: { level: 0, cost: 30, costIncrease: 2.5, value: 0.05, name: "幸运值" }
+    }
+};
+function loadMetaData() { const saved = localStorage.getItem('daylightRaidMeta'); if (saved) metaData = JSON.parse(saved); }
+function saveMetaData() { localStorage.setItem('daylightRaidMeta', JSON.stringify(metaData)); }
+
+// =================================
+// AUDIO SYSTEM
+// =================================
+let audioCtx;
+function initAudio() { if (!audioCtx) try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+function playSound(type) { if (!audioCtx || sfxVolume === 0) return; if(audioCtx.state === 'suspended') audioCtx.resume(); const now = audioCtx.currentTime; const gain = audioCtx.createGain(); gain.connect(audioCtx.destination); gain.gain.value = sfxVolume; const osc = audioCtx.createOscillator(); osc.connect(gain); switch(type){ case 'shoot': gain.gain.exponentialRampToValueAtTime(0.001*sfxVolume, now+0.1); osc.type = 'triangle'; osc.frequency.setValueAtTime(900, now); osc.frequency.exponentialRampToValueAtTime(300, now+0.1); break; case 'enemyHit': gain.gain.exponentialRampToValueAtTime(0.001*sfxVolume, now+0.15); osc.type = 'triangle'; osc.frequency.setValueAtTime(800, now); osc.frequency.exponentialRampToValueAtTime(200, now+0.15); break; case 'hit': gain.gain.exponentialRampToValueAtTime(0.001*sfxVolume, now + 0.15); osc.type = 'square'; osc.frequency.setValueAtTime(440, now); break; case 'auraHit': gain.gain.setValueAtTime(0.05*sfxVolume, now); gain.gain.exponentialRampToValueAtTime(0.001*sfxVolume, now+0.1); osc.type = 'sawtooth'; osc.frequency.setValueAtTime(1200, now); osc.frequency.exponentialRampToValueAtTime(800, now+0.1); break; case 'shieldHit': gain.gain.setValueAtTime(0.3*sfxVolume, now); gain.gain.exponentialRampToValueAtTime(0.001*sfxVolume, now+0.2); osc.type = 'sine'; osc.frequency.setValueAtTime(200, now); osc.frequency.exponentialRampToValueAtTime(100, now+0.2); break; case 'powerup': gain.gain.setValueAtTime(0.2*sfxVolume, now); gain.gain.linearRampToValueAtTime(0.001*sfxVolume, now+0.3); osc.type = 'sine'; osc.frequency.setValueAtTime(523.25, now); osc.frequency.exponentialRampToValueAtTime(1046.50, now+0.3); break; default: osc.disconnect(); return; } osc.start(now); osc.stop(now+0.5); }
+
+// =================================
+// ENTITY CLASSES
+// =================================
+class Entity { constructor(x, y, radius) { this.x = x; this.y = y; this.radius = radius; this.active = true; } draw(ctx) { ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill(); } }
+class Player extends Entity {
+    constructor(x, y) {
+        super(x, y, 20);
+        this.baseSpeed = 3.5; this.baseHealth = 100;
+        this.color = '#34568B'; this.shield = 0; this.maxShield = 50;
+        this.xp = 0; this.level = 1; this.xpToLevel = 100;
+        this.angle = 0; this.invincibleTimer = 0; this.fireCooldown = 0;
+        this.upgrades = {}; this.weapons = []; this.mainWeaponLevel = 0;
+        this.drawShapeFunc = PLAYER_SHAPES.triangle;
+        this.speed = this.baseSpeed * (1 + metaData.upgrades.speed.level * metaData.upgrades.speed.value);
+        this.maxHealth = this.baseHealth + (metaData.upgrades.health.level * metaData.upgrades.health.value);
+        this.health = this.maxHealth;
+        this.pickupRadius = 50;
+        this.damageMultiplier = 1;
+        this.shieldFlashTimer = 0;
+        this.currentWeapon = WEAPONS.default;
+        this.tempWeaponTimer = 0;
+    }
+    update(dt) {
+        if (this.invincibleTimer > 0) this.invincibleTimer -= dt;
+        if (this.shieldFlashTimer > 0) this.shieldFlashTimer -= dt;
+        if (this.fireCooldown > 0) this.fireCooldown -= dt;
+        if (this.tempWeaponTimer > 0) { this.tempWeaponTimer -= dt; if(this.tempWeaponTimer <= 0) this.currentWeapon = WEAPONS.default; }
+        if ((mouse.down || keys[' ']) && this.fireCooldown <= 0) this.shoot();
+        this.weapons.forEach(w => { w.cooldown -= dt; if (w.cooldown <= 0) this.fireAutoWeapon(w); });
+        let moveX = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
+        let moveY = (keys['s'] || keys['arrowdown'] ? 1 : 0) - (keys['w'] || keys['arrowup'] ? 1 : 0);
+        const mag = Math.sqrt(moveX * moveX + moveY * moveY);
+        if (mag > 0) { this.x += (moveX / mag) * this.speed; this.y += (moveY / mag) * this.speed; }
+        this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
+        this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
+        this.angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+    }
+    shoot() {
+        const weapon = this.currentWeapon;
+        playSound('shoot');
+        this.fireCooldown = 1 / weapon.fireRate;
+        for (let i = 0; i < weapon.bulletCount; i++) {
+            const angle = this.angle + (Math.random() - 0.5) * (weapon.spread || 0.1);
+            entities.bullets.push(new Bullet(this.x, this.y, angle, true, { damage: weapon.damage }));
+        }
+    }
+    fireAutoWeapon(weapon) {
+        const target = findNearestEnemy(this.x, this.y);
+        const level = this.upgrades[weapon.key]?.level || 1;
+        switch(weapon.key) {
+            case 'magicMissile': if(target){ weapon.cooldown = 2.5 - level * 0.3; const damage = (UPGRADE_POOL.magicMissile.baseDamage + (level - 1) * 1.5) * this.damageMultiplier; const angle = Math.atan2(target.y - this.y, target.x - this.x); entities.bullets.push(new Bullet(this.x, this.y, angle, true, { tracking: true, color: '#9400D3', damage: damage })); } break;
+            case 'guardianAura': weapon.cooldown = 0.2; const radius = 60 + level * 10; const damage = UPGRADE_POOL.guardianAura.baseDamage * level * this.damageMultiplier; entities.enemies.forEach(e => { if (e.active && Math.hypot(this.x - e.x, this.y - e.y) < radius) { e.takeDamage(damage); playSound('auraHit'); particles.push(new Particle(e.x, e.y, 3, 'rgba(135, 206, 250, 0.8)', 0.2)); }}); break;
+        }
+    }
+    addXp(amount) {
+        this.xp += amount * (1 + metaData.upgrades.xpRate.level * metaData.upgrades.xpRate.value);
+        if (this.xp >= this.xpToLevel) {
+            this.xp -= this.xpToLevel; this.level++; this.xpToLevel = Math.floor(this.xpToLevel * 1.2);
+            gameState = 'levelUp'; createLevelUpScreen(getUpgradeChoices(this));
+        }
+    }
+    takeDamage(amount){
+        if(this.invincibleTimer > 0) return;
+        if(this.shield > 0) {
+            this.shield -= amount;
+            playSound('shieldHit');
+            this.shieldFlashTimer = 0.2;
+            if(this.shield < 0) { this.health += this.shield; this.shield = 0; }
+        } else {
+            this.health -= amount;
+            playSound('hit');
+            triggerScreenShake(5,0.2);
+        }
+        if(this.health <= 0) { this.health = 0; endGame(); }
+        this.invincibleTimer = 1.5;
+    }
+    draw(ctx) {
+        if (this.invincibleTimer > 0 && Math.floor(gameTime * 20) % 2 === 0) return;
+        if (this.upgrades.guardianAura) { const level = this.upgrades.guardianAura.level; const radius = 60 + level * 10; ctx.fillStyle = `rgba(135, 206, 250, ${0.1 + level * 0.05})`; ctx.beginPath(); ctx.arc(this.x, this.y, radius, 0, Math.PI * 2); ctx.fill(); }
+        if (this.shield > 0) { ctx.strokeStyle = `rgba(52, 152, 219, ${this.shieldFlashTimer > 0 ? 1 : 0.5})`; ctx.lineWidth = 2 + (this.shield / this.maxShield) * 4; ctx.beginPath(); ctx.arc(this.x, this.y, this.radius + 8, 0, Math.PI * 2); ctx.stroke(); }
+        ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle); this.drawShapeFunc(ctx, this.radius, this.color); ctx.restore();
+    }
+}
+class Enemy extends Entity {
+    constructor(x, y, type, isElite=false) {
+        super(x, y, type.RADIUS * (isElite ? 1.5 : 1));
+        this.isElite = isElite; this.color = isElite ? '#F1C40F' : type.COLOR;
+        this.speed = type.SPEED * (1 + wave.number / 20) * (isElite ? 0.8 : 1);
+        this.health = type.HEALTH * (1 + Math.floor(wave.number/5)) * (isElite ? 10 : 1);
+        this.xp = type.XP * (isElite ? 5 : 1);
+        this.type = type;
+        this.fireCooldown = 1 / (this.type.FIRE_RATE || 1);
+    }
+    update(dt, player) {
+        const angleToPlayer = Math.atan2(player.y - this.y, player.x - this.x);
+        if (this.type === ENEMY_TYPES.SHOOTER) {
+            const dist = Math.hypot(this.x - player.x, this.y - player.y);
+            if (dist > 300) { this.x += Math.cos(angleToPlayer) * this.speed; this.y += Math.sin(angleToPlayer) * this.speed; }
+            this.fireCooldown -= dt;
+            if (this.fireCooldown <= 0) { entities.bullets.push(new Bullet(this.x, this.y, angleToPlayer, false)); this.fireCooldown = 1 / this.type.FIRE_RATE; }
+        } else {
+            this.x += Math.cos(angleToPlayer) * this.speed; this.y += Math.sin(angleToPlayer) * this.speed;
+        }
+    }
+    takeDamage(amount) { this.health -= amount; if(this.health <= 0) this.active = false; }
+}
+class Bullet extends Entity {
+    constructor(x, y, angle, isPlayer, props = {}) {
+        super(x, y, 5); this.isPlayer = isPlayer; this.color = props.color || (isPlayer ? '#00BFFF' : '#FF007F');
+        const speed = isPlayer ? 8 : 5; this.vx = Math.cos(angle) * speed; this.vy = Math.sin(angle) * speed;
+        this.tracking = props.tracking || false;
+        this.damage = props.damage || (isPlayer ? player.currentWeapon.damage * player.damageMultiplier : 10);
+    }
+    update(dt) {
+        if (this.tracking) { const target = findNearestEnemy(this.x, this.y); if (target) { const angle = Math.atan2(target.y-this.y, target.x-this.x); const speed = Math.hypot(this.vx, this.vy); this.vx += (Math.cos(angle)*speed - this.vx)*0.1; this.vy += (Math.sin(angle)*speed - this.vy)*0.1; }}
+        this.x += this.vx; this.y += this.vy; if (this.x<0||this.x>canvas.width||this.y<0||this.y>canvas.height) this.active=false;
+    }
+}
+class ExperienceOrb extends Entity {
+    constructor(x, y, value) { super(x, y, 5); this.value = value; this.color = '#F1C40F'; }
+    update(dt, player) {
+        const dist = Math.hypot(this.x - player.x, this.y - player.y);
+        if (dist < player.pickupRadius) {
+            const angle = Math.atan2(player.y - this.y, player.x - this.x);
+            this.x += Math.cos(angle) * 10; this.y += Math.sin(angle) * 10;
+            if (dist < player.radius) { player.addXp(this.value); this.active = false; }
+        }
+    }
+}
+class PowerUp extends Entity {
+    constructor(x, y) {
+        const types = ['HEALTH', 'SHIELD', 'WEAPON'];
+        const type = types[Math.floor(Math.random() * types.length)];
+        super(x, y, 12);
+        this.type = type;
+        this.life = 10; // 10 seconds to pick up
+        switch(type) {
+            case 'HEALTH': this.color = '#2ECC71'; break;
+            case 'SHIELD': this.color = '#3498DB'; break;
+            case 'WEAPON': this.color = '#F1C40F'; break;
+        }
+    }
+    update(dt) { this.life -= dt; if(this.life <= 0) this.active = false; }
+    apply(player) {
+        playSound('powerup');
+        switch(this.type) {
+            case 'HEALTH': player.health = Math.min(player.maxHealth, player.health + 25); break;
+            case 'SHIELD': player.shield = player.maxShield; break;
+            case 'WEAPON': const tempWeapons = ['shotgun', 'machinegun']; player.currentWeapon = WEAPONS[tempWeapons[Math.floor(Math.random() * tempWeapons.length)]]; player.tempWeaponTimer = 15; break;
+        }
+        this.active = false;
+    }
+}
+class Particle extends Entity { constructor(x,y,r,c,l){super(x,y,r);this.color=c;this.life=l;this.initialLife=l;this.vx=(Math.random()-.5)*5;this.vy=(Math.random()-.5)*5}update(dt){this.x+=this.vx;this.y+=this.vy;this.life-=dt;if(this.life<=0)this.active=false}draw(ctx){ctx.save();ctx.globalAlpha=this.life/this.initialLife;ctx.fillStyle=this.color;ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();ctx.restore()}}
+
+// =================================
+// GAME LOGIC & FLOW
+// =================================
+function initGame() {
+    keys = {}; mouse.down = false;
+    entities = { enemies: [], bullets: [], orbs: [], powerups: [] };
+    particles = [];
+    player = new Player(canvas.width / 2, canvas.height / 2);
+    const savedShape = document.querySelector('#shape-selector .active').dataset.shape;
+    player.drawShapeFunc = PLAYER_SHAPES[savedShape];
+    score = 0; gameTime = 0; tempMetaCurrency = 0;
+    wave = { number: 0, timer: 3, isSpawning: false };
+    WEAPONS.default.fireRate = 8; WEAPONS.default.bulletCount = 1; WEAPONS.default.damage = 1;
+}
+function update(dt) {
+    gameTime += dt;
+    if (wave.timer > 0) { wave.timer -= dt; if (wave.timer <= 0) nextWave(); } 
+    else if (!wave.isSpawning && entities.enemies.length === 0) { wave.timer = 3; }
+    if(player) player.update(dt);
+    if (!player || !player.active) return;
+    Object.values(entities).flat().forEach(e => e.update(dt, player));
+    handleCollisions();
+    for (const key in entities) { entities[key] = entities[key].filter(e => e.active); }
+}
+function handleCollisions() {
+    for (const b of entities.bullets) {
+        if (b.isPlayer && b.active) {
+            for (const e of entities.enemies) {
+                if (e.active && Math.hypot(b.x-e.x, b.y-e.y) < b.radius+e.radius) {
+                    b.active = false; e.takeDamage(b.damage); playSound('enemyHit');
+                    if (!e.active) { score += e.xp; entities.orbs.push(new ExperienceOrb(e.x, e.y, e.xp)); if(e.isElite) tempMetaCurrency++; if(Math.random() < 0.1) entities.powerups.push(new PowerUp(e.x, e.y)); }
+                    break;
+                }
+            }
+        } else if (!b.isPlayer && b.active) {
+             if(player.active && Math.hypot(b.x - player.x, b.y - player.y) < b.radius + player.radius) { b.active = false; player.takeDamage(10); }
+        }
+    }
+    for (const e of entities.enemies) {
+        if (e.active && player.active && Math.hypot(e.x - player.x, e.y - player.y) < e.radius + player.radius) {
+            player.takeDamage(20);
+            e.active = false;
+        }
+    }
+    for (const p of entities.powerups) {
+        if (p.active && player.active && Math.hypot(p.x - player.x, p.y - player.y) < p.radius + player.radius) {
+            p.apply(player);
+        }
+    }
+}
+function render() {
+    ctx.fillStyle = '#F0F4F8'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.2)'; ctx.shadowBlur = 5; ctx.shadowOffsetX = 3; ctx.shadowOffsetY = 3;
+    if ((gameState === 'playing' || gameState === 'paused' || gameState === 'levelUp') && player) {
+        player.draw(ctx);
+        Object.values(entities).flat().forEach(e => e.draw(ctx));
+    }
+    ctx.restore();
+    if (gameState === 'playing' || gameState === 'paused') drawUI();
+}
+function drawUI() {
+    if(!player) return;
+    document.getElementById('meta-currency-display').innerText = `核心: ${tempMetaCurrency}`;
+    ctx.fillStyle = '#333'; ctx.font = '24px Segoe UI'; ctx.textAlign = 'left';
+    ctx.fillText(`分数: ${score}`, 20, 40); ctx.fillText(`波数: ${wave.number}`, 20, 70);
+    ctx.fillStyle = '#00000022'; ctx.fillRect(20, canvas.height - 40, 200, 20);
+    ctx.fillStyle = '#E74C3C'; ctx.fillRect(20, canvas.height - 40, (player.health / player.maxHealth) * 200, 20);
+    if(player.shield > 0) { ctx.fillStyle = '#3498DBaa'; ctx.fillRect(20, canvas.height-40, (player.shield/player.maxShield)*200, 20); }
+    ctx.fillStyle = '#00000022'; ctx.fillRect(20, canvas.height - 70, 200, 10);
+    ctx.fillStyle = '#F1C40F'; ctx.fillRect(20, canvas.height - 70, (player.xp / player.xpToLevel) * 200, 10);
+}
+function gameLoop(timestamp) { if (!lastTime) lastTime = timestamp; const dt = (timestamp - lastTime) / 1000; lastTime = timestamp; if (gameState === 'playing') update(dt); render(); requestAnimationFrame(gameLoop); }
+function startGame() { const allScreens = document.querySelectorAll('.screen'); allScreens.forEach(s => s.style.display = 'none'); initAudio(); document.getElementById('bgmAudio').volume = bgmVolume; document.getElementById('bgmAudio').play().catch(()=>{}); initGame(); gameState = 'playing'; document.getElementById('settings-button').style.display = 'block'; document.getElementById('meta-currency-display').style.display = 'block'; }
+function endGame() {
+    gameState = 'gameOver'; document.getElementById('bgmAudio').pause();
+    metaData.currency += tempMetaCurrency; saveMetaData();
+    const screen = document.getElementById('gameOverScreen');
+    screen.innerHTML = `<h1>作战失败</h1><p>最终得分: ${score} | 到达波数: ${wave.number}</p><p>获得记忆核心: ${tempMetaCurrency}</p><button class="button restart">再来一次</button><button class="button main-menu">返回主菜单</button>`;
+    screen.style.display = 'flex';
+    screen.querySelector('.restart').addEventListener('click', startGame);
+    screen.querySelector('.main-menu').addEventListener('click', () => { screen.style.display = 'none'; document.getElementById('startScreen').style.display = 'flex'; });
+    document.getElementById('settings-button').style.display = 'none';
+    document.getElementById('meta-currency-display').style.display = 'none';
+}
+function findNearestEnemy(x,y) { let nearest = null; let minDist = Infinity; for (const e of entities.enemies) { if (!e.active) continue; const dist = Math.hypot(x-e.x, y-e.y); if(dist < minDist) { minDist = dist; nearest = e; }} return nearest; }
+function nextWave() { wave.number++; wave.timer = 0; wave.isSpawning = true; const enemyCount = 5 + wave.number * 2; for (let i = 0; i < enemyCount; i++) { setTimeout(spawnEnemy, i * 200); } setTimeout(() => wave.isSpawning = false, enemyCount * 200); }
+function spawnEnemy() {
+    if (gameState !== 'playing') return; const side = Math.floor(Math.random() * 4); let x, y;
+    if (side === 0) { x = Math.random() * canvas.width; y = -50; } else if (side === 1) { x = canvas.width + 50; y = Math.random() * canvas.height; } else if (side === 2) { x = Math.random() * canvas.width; y = canvas.height + 50; } else { x = -50; y = Math.random() * canvas.height; }
+    let type = Math.random() < 0.7 ? ENEMY_TYPES.CHASER : ENEMY_TYPES.SHOOTER;
+    const isElite = Math.random() < (0.05 + metaData.upgrades.luck.level * metaData.upgrades.luck.value / 10);
+    entities.enemies.push(new Enemy(x, y, type, isElite));
+}
+function triggerScreenShake(intensity, duration) { /* not implemented for brevity */ }
+function getUpgradeChoices(player) {
+    const pool = [];
+    for (const key in UPGRADE_POOL) { const owned = player.upgrades[key]; if (!owned || owned.level < UPGRADE_POOL[key].maxLevel) pool.push(key); }
+    if (player.mainWeaponLevel < 5) pool.push('mainWeapon');
+    const choices = new Set();
+    while (choices.size < 3 && pool.length > 0) { const idx = Math.floor(Math.random() * pool.length); choices.add(pool.splice(idx, 1)[0]); }
+    return Array.from(choices);
+}
+function applyUpgrade(player, key) { if (!player.upgrades[key]) { player.upgrades[key] = { level: 0, data: UPGRADE_POOL[key] }; if (UPGRADE_POOL[key].type === 'weapon') player.weapons.push({ key: key, cooldown: 0 }); } player.upgrades[key].level++; switch (key) { case 'speedRune': player.speed *= 1.08; break; case 'armorPlate': player.maxHealth += 10; player.health += 10; break; case 'xpMagnet': player.pickupRadius *= 1.25; break; case 'powerMatrix': player.damageMultiplier *= 1.05; break; case 'mainWeapon': player.mainWeaponLevel++; WEAPONS.default.fireRate *= 1.15; WEAPONS.default.damage += 0.5; break; } }
+function createLevelUpScreen(choices) {
+    const screen = document.getElementById('levelUpScreen'); let content = `<h1>能力提升！</h1>`;
+    choices.forEach(key => { let name, desc, level; if (key === 'mainWeapon') { name = "强化主武器"; desc = "提升射速和伤害。"; level = player.mainWeaponLevel; } else { const data = UPGRADE_POOL[key]; const owned = player.upgrades[key]; name = data.name; desc = data.description; level = owned ? owned.level : 0; } content += `<div class="upgrade-choice" data-key="${key}"><h3>${name} <span class="level">Lv ${level + 1}</span></h3><p>${desc}</p></div>`; });
+    screen.innerHTML = content; screen.style.display = 'flex'; screen.style.flexDirection = 'column';
+    screen.querySelectorAll('.upgrade-choice').forEach(c => c.addEventListener('click', e => { applyUpgrade(player, e.currentTarget.dataset.key); screen.style.display = 'none'; gameState = 'playing'; lastTime = performance.now(); }));
+}
+function createWorkshopScreen() {
+    const screen = document.getElementById('workshopScreen'); let content = `<h1>工坊</h1><div id="workshop-currency">记忆核心: ${metaData.currency}</div><div>`;
+    for (const key in metaData.upgrades) { const upg = metaData.upgrades[key]; const cost = Math.floor(upg.cost * Math.pow(upg.costIncrease, upg.level)); content += `<div class="upgrade-item"><div><strong>${upg.name}</strong> (等级 ${upg.level})</div><span><button class="buy-upgrade" data-key="${key}" ${metaData.currency < cost ? 'disabled' : ''}>升级 (花费 ${cost})</button></span></div>`; }
+    content += `</div><button class="button close-workshop">返回</button>`; screen.innerHTML = content;
+    screen.querySelector('.close-workshop').addEventListener('click', () => { screen.style.display = 'none'; document.getElementById('startScreen').style.display = 'flex'; });
+    screen.querySelectorAll('.buy-upgrade').forEach(b => b.addEventListener('click', e => { const key = e.target.dataset.key; const upg = metaData.upgrades[key]; const cost = Math.floor(upg.cost * Math.pow(upg.costIncrease, upg.level)); if (metaData.currency >= cost) { metaData.currency -= cost; upg.level++; saveMetaData(); createWorkshopScreen(); }}));
+}
+function setupUI() {
+    const startEl = document.getElementById('startScreen');
+    startEl.innerHTML = `<h1>日光突袭</h1><p>收集记忆核心，在工坊中永久强化自己！</p><button id="startButton" class="button">开始作战</button><button id="workshopButton" class="button">工坊</button>`;
+    startEl.querySelector('#startButton').addEventListener('click', startGame);
+    startEl.querySelector('#workshopButton').addEventListener('click', () => { createWorkshopScreen(); startEl.style.display = 'none'; document.getElementById('workshopScreen').style.display = 'flex'; });
+    const settingsEl = document.getElementById('settingsScreen'); 
+    settingsEl.innerHTML = `<h1>设置</h1><div class="menu-row"><label>背景音乐</label><input type="range" id="bgmVolumeSlider" min="0" max="1" step="0.01"></div><div class="menu-row"><label>游戏音效</label><input type="range" id="sfxVolumeSlider" min="0" max="1" step="0.01"></div><div class="menu-row"><label>飞船形状</label><div id="shape-selector"><button data-shape="triangle" class="active">三角</button><button data-shape="square">方块</button><button data-shape="star">星型</button></div></div><button class="button close-settings">返回</button>`;
+    settingsEl.querySelector('#bgmVolumeSlider').value = bgmVolume; settingsEl.querySelector('#sfxVolumeSlider').value = sfxVolume;
+    settingsEl.querySelector('#bgmVolumeSlider').addEventListener('input', e => { bgmVolume = parseFloat(e.target.value); document.getElementById('bgmAudio').volume = bgmVolume; });
+    settingsEl.querySelector('#sfxVolumeSlider').addEventListener('input', e => { sfxVolume = parseFloat(e.target.value); });
+    settingsEl.querySelector('#shape-selector').addEventListener('click', e => { if (e.target.tagName === 'BUTTON') { settingsEl.querySelector('#shape-selector .active').classList.remove('active'); e.target.classList.add('active'); if(player) player.drawShapeFunc = PLAYER_SHAPES[e.target.dataset.shape]; }});
+    settingsEl.querySelector('.close-settings').addEventListener('click', () => { settingsEl.style.display = 'none'; if(gameState === 'paused') { gameState = 'playing'; lastTime = performance.now(); document.getElementById('bgmAudio').play().catch(()=>{}); }});
+    document.getElementById('settings-button').addEventListener('click', () => { if (gameState === 'playing') { gameState = 'paused'; document.getElementById('bgmAudio').pause(); settingsEl.style.display = 'flex'; }});
+    window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key === 'Escape' && (gameState === 'playing' || gameState === 'paused')){document.getElementById('settings-button').click()}});
+    window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+    window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+    canvas.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+    canvas.addEventListener('mousedown', e => { if (e.button === 0) mouse.down = true; });
+    canvas.addEventListener('mouseup', e => { if (e.button === 0) mouse.down = false; });
+}
+// =================================
+// INITIALIZATION
+// =================================
+loadMetaData();
+setupUI();
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
