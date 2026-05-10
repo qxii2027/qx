@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>孤胆枪手：日光突袭 (最终稳定版)</title>
+    <title>日光突袭——by q熙</title>
     <style>
         body { margin: 0; background-color: #d8d8d8; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; }
         canvas { display: block; background-color: #F0F4F8; cursor: crosshair; }
@@ -390,7 +390,7 @@ function createWorkshopScreen() {
 }
 function setupUI() {
     const startEl = document.getElementById('startScreen');
-    startEl.innerHTML = `<h1>日光突袭</h1><p>收集记忆核心，在工坊中永久强化自己！</p><button id="startButton" class="button">开始作战</button><button id="workshopButton" class="button">工坊</button>`;
+    startEl.innerHTML = `<h1>日光突袭</h1><p>收集记忆核心，在工坊中永久强化自己！——q熙</p><button id="startButton" class="button">开始作战</button><button id="workshopButton" class="button">工坊</button>`;
     startEl.querySelector('#startButton').addEventListener('click', startGame);
     startEl.querySelector('#workshopButton').addEventListener('click', () => { createWorkshopScreen(); startEl.style.display = 'none'; document.getElementById('workshopScreen').style.display = 'flex'; });
     const settingsEl = document.getElementById('settingsScreen'); 
